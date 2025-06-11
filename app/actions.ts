@@ -6,9 +6,8 @@ import Task, { type ITask } from "@/models/Task"
 import Subscription from "@/models/Subscription"
 
 // VAPID keys setup
-// TODO: Replace 'your-email@example.com' with your actual contact email for VAPID.
 webpush.setVapidDetails(
-  "mailto:your-email@example.com",
+  "mailto:uniqbrio@gmail.com", // Replace with your actual contact email
   process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY ||
     "BEl62iUYgUivxIkv69yViEuiBIa40HI2wLsHw4XloDiUnzSFvzIlSJRWaAcqP5h6HV6yJXxYJSQJbaYVpAidZis",
   process.env.VAPID_PRIVATE_KEY || "VCXEuSHQX6ueEB5ckbAPaEkX6cJhHQnuTjMOcHXldCo",

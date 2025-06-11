@@ -78,38 +78,52 @@ self.addEventListener('fetch', event => {
 // Push event: handle incoming push notifications
 self.addEventListener('push', event => {
   let pushPayload = {
-    title: 'Task Manager', // Default title
-    body: 'You have a new notification.', // Default body
-    icon: '/icons/icon-192x192.png',
-    badge: '/icons/icon-96x96.png', // Often a monochrome icon for status bar
-    data: { url: '/' }, // Default click action data; passed to notificationclick
-    actions: [], // e.g., [{ action: 'view', title: 'View Task', icon: '/icons/action-view.png' }]
-    tag: undefined, // Optional: for replacing/grouping notifications
-    renotify: false, // Optional: re-alert user for same tag
+        title: 'Task Manager (Default)', // Default title
+        body: 'You have a new notification. (Default)', // Default body
+        icon: '/icons/icon-192x192.png', // Default icon
+        badge: '/icons/icon-96x96.png', // Default badge
+        data: { url: '/', source: 'default' }, // Default data
+        actions: [],
+        tag: undefined,
+        renotify: false,
     // vibrate: [100, 50, 100], // Optional: vibration pattern
     // requireInteraction: false, // Optional: if notification should persist
   };
 
+      console.log('[SW] Push event received:', event);
+    
   if (event.data) {
+        let receivedDataJson;
+        let receivedDataText = 'N/A'; // Initialize to avoid undefined if text() fails
     try {
-      const receivedData = event.data.json();
+          // It's safer to clone if you need to access the data multiple times or in different formats.
+          const dataCloneForText = event.data.clone();
+          receivedDataText = dataCloneForText.text();
+          console.log('[SW] Push data as text:', receivedDataText);
+    
+          receivedDataJson = event.data.json(); // This consumes the original event.data stream
+          console.log('[SW] Push data parsed as JSON:', receivedDataJson);
+    
       // Merge received data with defaults, received data takes precedence
       // but ensure critical fields have fallbacks if receivedData provides null/undefined
-      pushPayload.title = receivedData.title || pushPayload.title;
-      pushPayload.body = receivedData.body || pushPayload.body;
-      pushPayload.icon = receivedData.icon || pushPayload.icon;
-      pushPayload.badge = receivedData.badge || pushPayload.badge;
-      pushPayload.data = receivedData.data || pushPayload.data;
-      pushPayload.actions = receivedData.actions || pushPayload.actions;
-      pushPayload.tag = receivedData.tag; // Can be undefined
-      pushPayload.renotify = receivedData.renotify || false;
-      // pushPayload.vibrate = receivedData.vibrate || pushPayload.vibrate;
-      // pushPayload.requireInteraction = receivedData.requireInteraction || pushPayload.requireInteraction;
+          // Use received value only if it's a non-empty string, otherwise fallback to SW default.
+          pushPayload.title = (receivedDataJson.title && String(receivedDataJson.title).trim() !== "") ? String(receivedDataJson.title) : pushPayload.title;
+          pushPayload.body = (receivedDataJson.body && String(receivedDataJson.body).trim() !== "") ? String(receivedDataJson.body) : pushPayload.body;
+          pushPayload.icon = receivedDataJson.icon || pushPayload.icon;
+          pushPayload.badge = receivedDataJson.badge || pushPayload.badge;
+          pushPayload.data = receivedDataJson.data || pushPayload.data;
+          pushPayload.actions = receivedDataJson.actions || pushPayload.actions;
+          pushPayload.tag = receivedDataJson.tag;
+          pushPayload.renotify = typeof receivedDataJson.renotify === 'boolean' ? receivedDataJson.renotify : pushPayload.renotify;
     } catch (e) {
-      // If payload is not JSON, assume it's a string for the body
-      pushPayload.body = event.data.text();
-      // Other defaults (title, icon, etc.) remain as set initially
+          console.error('[SW] Error parsing push data as JSON. Falling back if text was available.', e);
+          // If JSON parsing failed, use the text content if it was successfully read.
+          if (receivedDataText !== 'N/A') {
+            pushPayload.body = `Error parsing details. Content: ${receivedDataText.substring(0, 100)}`; // Use text if JSON fails
+          }
     }
+      } else {
+        console.log('[SW] Push event data is null or undefined. Using default payload.');
   }
 
   const notificationOptions = {
