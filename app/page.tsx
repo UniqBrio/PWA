@@ -97,7 +97,7 @@ function PushNotificationManager() {
 
   async function sendTestNotification() {
     if (subscription && message) {
-      await sendNotification(message)
+      await sendNotification({ type: "test_message", message })
       setMessage("")
     }
   }
@@ -208,7 +208,11 @@ function TaskManager() {
       await loadStats()
       // Send notification for the newly created task
       if (task.title) {
-        await sendNotification(`New task added: ${task.title}`)
+        // Send notification with a proper NotificationPayloadInput object
+        await sendNotification({
+          type: "task_created",
+          task: { _id: task._id, title: task.title }
+        });
       }
     } catch (error) {
       console.error("Failed to create task:", error)
