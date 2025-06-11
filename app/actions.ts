@@ -6,6 +6,7 @@ import Task, { type ITask } from "@/models/Task"
 import Subscription from "@/models/Subscription"
 
 // VAPID keys setup
+// TODO: Replace 'your-email@example.com' with your actual contact email for VAPID.
 webpush.setVapidDetails(
   "mailto:your-email@example.com",
   process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY ||
@@ -24,16 +25,20 @@ interface NotificationPayloadInput {
 export async function subscribeUser(sub: PushSubscription) {
   try {
     await connectDB()
+    const p256dhKey = typeof sub.getKey === "function" ? sub.getKey("p256dh") : null;
+    const authKey = typeof sub.getKey === "function" ? sub.getKey("auth") : null;
 
     const subscription = await Subscription.findOneAndUpdate(
       { endpoint: sub.endpoint },
       {
         endpoint: sub.endpoint,
         keys: {
-          p256dh: typeof sub.getKey === "function" ? Buffer.from(sub.getKey("p256dh")!).toString("base64") : undefined,
-          auth: typeof sub.getKey === "function" ? Buffer.from(sub.getKey("auth")!).toString("base64") : undefined,
+          p256dh: p256dhKey ? Buffer.from(p256dhKey).toString("base64") : undefined,
+          auth: authKey ? Buffer.from(authKey).toString("base64") : undefined,
         },
-        userAgent: typeof navigator !== "undefined" ? navigator.userAgent : undefined,
+        // Note: `navigator.userAgent` will be undefined here as this is server-side code.
+        // If userAgent is needed for analytics or debugging, it should be passed from the client.
+        userAgent: typeof navigator !== "undefined" ? navigator.userAgent : undefined, 
         lastUsed: new Date(),
         active: true,
       },
@@ -55,8 +60,11 @@ export async function unsubscribeUser(endpoint?: string) {
     if (endpoint) {
       await Subscription.findOneAndUpdate({ endpoint }, { active: false })
     } else {
-      // Deactivate all subscriptions (fallback)
-      await Subscription.updateMany({}, { active: false })
+      // WARNING: Deactivates ALL subscriptions in the database.
+      // This branch is hit if `unsubscribeUser` is called without an endpoint.
+      // Ensure this is the intended behavior for such calls.
+      console.warn("Deactivating ALL subscriptions as no specific endpoint was provided to unsubscribeUser.");
+      await Subscription.updateMany({}, { active: false });
     }
 
     return { success: true }
@@ -186,11 +194,17 @@ export async function sendNotification(payloadData: NotificationPayloadInput) {
         console.error(`Failed to send notification to ${subscription.endpoint}:`, error)
 
         // Deactivate invalid subscriptions
-        if (typeof error === "object" && error !== null && "statusCode" in error && (error as any).statusCode === 410) {
-          subscription.active = false
-          await subscription.save()
+        if (
+          typeof error === "object" &&
+          error !== null &&
+          "statusCode" in error &&
+          (error as any).statusCode &&
+          ((error as any).statusCode === 410 || (error as any).statusCode === 404)
+        ) {
+          console.log(`Deactivating subscription for endpoint ${subscription.endpoint} due to status code ${(error as any).statusCode}.`);
+          subscription.active = false;
+          await subscription.save();
         }
-
         return { success: false, endpoint: subscription.endpoint, error }
       }
     })
@@ -231,18 +245,20 @@ export async function createTask(taskData: {
 
     // Schedule notification for due date (simplified - in production use a job queue)
     const timeUntilDue = new Date(taskData.dueDate).getTime() - Date.now()
-    if (timeUntilDue > 0 && timeUntilDue < 24 * 60 * 60 * 1000) { // Only schedule if due within 24 hours
+    // Only schedule if due within a reasonable future window (e.g., 24 hours) to avoid long-held timeouts.
+    if (timeUntilDue > 0 && timeUntilDue < 24 * 60 * 60 * 1000) { 
+      // IMPORTANT: `setTimeout` is NOT reliable for production environments for scheduling tasks.
+      // If the server restarts, these scheduled timeouts will be lost.
+      // For robust scheduling, use a proper job queue system (e.g., BullMQ, Agenda.js, or cloud-native schedulers).
       setTimeout(async () => {
         await sendNotification({
           type: 'task_due',
-          // Ensure task._id is available and correctly typed here
-          task: { _id: (task._id as any).toString(), title: task.title }
+          task: { _id: task._id.toString(), title: task.title }
         });
       }, timeUntilDue)
     }
-
     return {
-      _id: (task._id as unknown as { toString: () => string }).toString(),
+      _id: (task._id as any).toString(),
       title: task.title,
       description: task.description,
       dueDate: taskData.dueDate,
@@ -268,7 +284,7 @@ export async function getTasks() {
     const tasks = await Task.find({}).sort({ createdAt: -1 }).lean()
 
     return tasks.map((task) => ({
-      _id: (task._id as unknown as { toString: () => string }).toString(),
+ _id: (task._id as any).toString(),
       title: task.title,
       description: task.description || "",
       dueDate: task.dueDate.toISOString().slice(0, 16),
@@ -304,8 +320,7 @@ export async function completeTask(taskId: string) {
     // Send completion notification
     await sendNotification({
       type: 'task_completed',
-      // Ensure task._id is available and correctly typed here
-      task: { _id: (task._id as any).toString(), title: task.title }
+      task: { _id: task._id.toString(), title: task.title }
     });
 
     return { success: true, task: task.toObject() }
@@ -343,7 +358,7 @@ export async function updateTask(taskId: string, updates: Partial<ITask>) {
     }
 
     return {
-      _id: (task._id as unknown as { toString: () => string }).toString(),
+      _id: (task._id as any).toString(),
       title: task.title,
       description: task.description || "",
       dueDate: task.dueDate.toISOString().slice(0, 16),
