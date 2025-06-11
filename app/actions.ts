@@ -16,7 +16,7 @@ webpush.setVapidDetails(
 
 // Define a type for the structured notification payload data
 interface NotificationPayloadInput {
-  type: 'task_created' | 'task_completed' | 'task_due' | 'test_message';
+  type: 'task_created' | 'task_completed' | 'task_deleted' | 'task_due' | 'test_message';
   task?: { _id: string; title: string; /* other relevant task fields can be added here */ };
   message?: string; // For test messages or generic messages
   // Add other potential properties as needed for different notification types
@@ -126,6 +126,20 @@ export async function sendNotification(payloadData: NotificationPayloadInput) {
             url: `/tasks/${payloadData.task._id}`,
             timestamp: Date.now(),
             taskId: payloadData.task._id,
+          },
+        };
+        break;
+      case 'task_deleted':
+        if (!payloadData.task) throw new Error("Task data missing for task_deleted notification");
+        notificationPayloadContent = {
+          title: 'Task Deleted',
+          body: `Task "${payloadData.task.title}" has been removed.`,
+          icon: '/icons/icon-192x192.png',
+          badge: '/icons/icon-96x96.png',
+          tag: `task-deleted-${payloadData.task._id}`, // Use task._id to ensure tag uniqueness if needed
+          data: {
+            url: `/tasks`, // Or a relevant URL, like the main task list
+            timestamp: Date.now(),
           },
         };
         break;
@@ -243,6 +257,12 @@ export async function createTask(taskData: {
 
     await task.save()
 
+    // Send immediate "task created" notification
+    await sendNotification({
+      type: 'task_created',
+      task: { _id: task._id.toString(), title: task.title }
+    });
+
     // Schedule notification for due date (simplified - in production use a job queue)
     const timeUntilDue = new Date(taskData.dueDate).getTime() - Date.now()
     // Only schedule if due within a reasonable future window (e.g., 24 hours) to avoid long-held timeouts.
@@ -339,6 +359,12 @@ export async function deleteTask(taskId: string) {
     if (!task) {
       throw new Error("Task not found")
     }
+
+    // Send "task deleted" notification
+    await sendNotification({
+      type: 'task_deleted',
+      task: { _id: task._id.toString(), title: task.title } // Send task title for context in notification
+    });
 
     return { success: true }
   } catch (error) {

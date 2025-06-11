@@ -77,50 +77,61 @@ self.addEventListener('fetch', event => {
 
 // Push event: handle incoming push notifications
 self.addEventListener('push', event => {
-  console.log('[Service Worker] Push Received.');
-
-  let pushData = {
-    title: 'Task Manager PWA',
-    body: 'You have a new notification!',
-    icon: '/icons/icon-192x192.png', // Default icon
-    badge: '/icons/icon-96x96.png',  // Default badge
-    data: { url: '/' }               // Default click action data
+  let pushPayload = {
+    title: 'Task Manager', // Default title
+    body: 'You have a new notification.', // Default body
+    icon: '/icons/icon-192x192.png',
+    badge: '/icons/icon-96x96.png', // Often a monochrome icon for status bar
+    data: { url: '/' }, // Default click action data; passed to notificationclick
+    actions: [], // e.g., [{ action: 'view', title: 'View Task', icon: '/icons/action-view.png' }]
+    tag: undefined, // Optional: for replacing/grouping notifications
+    renotify: false, // Optional: re-alert user for same tag
+    // vibrate: [100, 50, 100], // Optional: vibration pattern
+    // requireInteraction: false, // Optional: if notification should persist
   };
 
   if (event.data) {
     try {
-      const eventJson = event.data.json();
-      // Merge received data with defaults, allowing server to override
-      pushData = { ...pushData, ...eventJson };
-      // Ensure `data` property from push payload is also merged if present
-      if (eventJson.data) {
-        pushData.data = { ...pushData.data, ...eventJson.data };
-      }
+      const receivedData = event.data.json();
+      // Merge received data with defaults, received data takes precedence
+      // but ensure critical fields have fallbacks if receivedData provides null/undefined
+      pushPayload.title = receivedData.title || pushPayload.title;
+      pushPayload.body = receivedData.body || pushPayload.body;
+      pushPayload.icon = receivedData.icon || pushPayload.icon;
+      pushPayload.badge = receivedData.badge || pushPayload.badge;
+      pushPayload.data = receivedData.data || pushPayload.data;
+      pushPayload.actions = receivedData.actions || pushPayload.actions;
+      pushPayload.tag = receivedData.tag; // Can be undefined
+      pushPayload.renotify = receivedData.renotify || false;
+      // pushPayload.vibrate = receivedData.vibrate || pushPayload.vibrate;
+      // pushPayload.requireInteraction = receivedData.requireInteraction || pushPayload.requireInteraction;
     } catch (e) {
-      console.warn('[Service Worker] Push event data is not JSON, treating as text for body.');
-      pushData.body = event.data.text();
+      // If payload is not JSON, assume it's a string for the body
+      pushPayload.body = event.data.text();
+      // Other defaults (title, icon, etc.) remain as set initially
     }
   }
 
-  const title = pushData.title;
-  const options = {
-    body: pushData.body,
-    icon: pushData.icon,
-    badge: pushData.badge, // Used on Android status bar
-    data: pushData.data,   // Pass custom data to the notification for click handling
-    // Example actions:
-    // actions: [
-    //   { action: 'view', title: 'View Task', icon: '/icons/action-view.png' },
-    //   { action: 'dismiss', title: 'Dismiss', icon: '/icons/action-dismiss.png' }
-    // ]
+  const notificationOptions = {
+    body: pushPayload.body,
+    icon: new URL(pushPayload.icon, self.location.origin).href,
+    badge: new URL(pushPayload.badge, self.location.origin).href,
+    data: pushPayload.data,
+    actions: pushPayload.actions,
+    tag: pushPayload.tag,
+    renotify: pushPayload.renotify,
+    // vibrate: pushPayload.vibrate,
+    // requireInteraction: pushPayload.requireInteraction,
   };
 
-  event.waitUntil(self.registration.showNotification(title, options));
+  event.waitUntil(
+    self.registration.showNotification(pushPayload.title, notificationOptions)
+  );
 });
 
 // Notification click event: handle user interaction with notification
 self.addEventListener('notificationclick', event => {
-  console.log('[Service Worker] Notification click Received.');
+  console.log('[Service Worker] Notification click Received.', event.action, event.notification.data);
   event.notification.close();
 
   // Default URL to open if no specific URL is in notification data
@@ -128,35 +139,46 @@ self.addEventListener('notificationclick', event => {
   let urlToOpen = defaultUrl;
 
   // Use the URL from the notification's data payload if available
-  if (event.notification.data && event.notification.data.url) {
-    urlToOpen = event.notification.data.url;
-  }
+  const notificationPayloadData = event.notification.data || {};
+  urlToOpen = notificationPayloadData.url || defaultUrl;
 
-  // If an action was defined and clicked (e.g., 'view')
-  // if (event.action === 'view' && event.notification.data && event.notification.data.taskUrl) {
-  //   urlToOpen = event.notification.data.taskUrl;
-  // } else if (event.action === 'dismiss') {
-  //   // Just close, already handled by event.notification.close()
-  //   return;
-  // }
+  // Handle specific actions defined in the notification
+  if (event.action) {
+    console.log(`[Service Worker] Notification action clicked: ${event.action}`);
+    // Example: if you have an action { action: 'view_details', title: 'View Details' }
+    // and your data payload includes a specific URL for that action:
+    // if (event.action === 'view_details' && notificationPayloadData.detailsUrl) {
+    //   urlToOpen = notificationPayloadData.detailsUrl;
+    // } else if (event.action === 'mark_done' && notificationPayloadData.taskId) {
+    //   // Perform a background task, e.g., API call
+    //   // event.waitUntil(
+    //   //   fetch(`/api/tasks/${notificationPayloadData.taskId}/complete`, { method: 'POST' })
+    //   //     .then(() => console.log('Task marked complete via notification action.'))
+    //   //     .catch(err => console.error('Failed to mark task complete:', err))
+    //   // );
+    //   // return; // Optionally, don't open a window for this action
+    // }
+    // Add more 'else if' blocks for other actions
+  }
 
   // Attempt to focus an existing window/tab or open a new one
   event.waitUntil(
     clients.matchAll({
       type: 'window',
-      includeUncontrolled: true // Important to find all clients
+      includeUncontrolled: true
     }).then(windowClients => {
+      const targetUrl = new URL(urlToOpen, self.location.origin);
       // Check if a window with the target URL is already open
       for (let i = 0; i < windowClients.length; i++) {
         const client = windowClients[i];
         // Compare pathnames to handle potential query params or hash differences
-        if (new URL(client.url).pathname === new URL(urlToOpen, self.location.origin).pathname && 'focus' in client) {
+        if (new URL(client.url).pathname === targetUrl.pathname && 'focus' in client) {
           return client.focus();
         }
       }
       // If no window is open with that URL, or it cannot be focused, open a new one.
       if (clients.openWindow) {
-        return clients.openWindow(urlToOpen);
+        return clients.openWindow(targetUrl.href);
       }
     })
   );

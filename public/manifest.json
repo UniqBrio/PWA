@@ -4,6 +4,7 @@
   "description": "A Progressive Web App with push notifications for managing tasks.",
   "start_url": "/",
   "display": "standalone",
+  "gcm_sender_id": "103953800507",
   "background_color": "#ffffff",
   "theme_color": "#000000",
   "orientation": "portrait-primary",
