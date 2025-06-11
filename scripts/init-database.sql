@@ -1,0 +1,42 @@
+-- Initialize MongoDB collections (this is a reference - MongoDB doesn't use SQL)
+-- Run this conceptually to understand the data structure
+
+-- Tasks collection structure:
+-- {
+--   _id: ObjectId,
+--   title: String,
+--   description: String,
+--   dueDate: Date,
+--   completed: Boolean,
+--   createdAt: Date,
+--   completedAt: Date (optional)
+-- }
+
+-- Subscriptions collection structure:
+-- {
+--   _id: ObjectId,
+--   endpoint: String,
+--   keys: {
+--     p256dh: String,
+--     auth: String
+--   },
+--   createdAt: Date
+-- }
+
+-- Sample data insertion (MongoDB syntax):
+-- db.tasks.insertMany([
+--   {
+--     title: "Complete project proposal",
+--     description: "Finish the Q4 project proposal document",
+--     dueDate: new Date("2024-12-15T10:00:00Z"),
+--     completed: false,
+--     createdAt: new Date()
+--   },
+--   {
+--     title: "Team meeting",
+--     description: "Weekly team sync meeting",
+--     dueDate: new Date("2024-12-10T14:00:00Z"),
+--     completed: false,
+--     createdAt: new Date()
+--   }
+-- ])
