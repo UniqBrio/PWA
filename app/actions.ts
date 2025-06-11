@@ -13,6 +13,14 @@ webpush.setVapidDetails(
   process.env.VAPID_PRIVATE_KEY || "VCXEuSHQX6ueEB5ckbAPaEkX6cJhHQnuTjMOcHXldCo",
 )
 
+// Define a type for the structured notification payload data
+interface NotificationPayloadInput {
+  type: 'task_created' | 'task_completed' | 'task_due' | 'test_message';
+  task?: { _id: string; title: string; /* other relevant task fields can be added here */ };
+  message?: string; // For test messages or generic messages
+  // Add other potential properties as needed for different notification types
+}
+
 export async function subscribeUser(sub: PushSubscription) {
   try {
     await connectDB()
@@ -58,7 +66,7 @@ export async function unsubscribeUser(endpoint?: string) {
   }
 }
 
-export async function sendNotification(message: string) {
+export async function sendNotification(payloadData: NotificationPayloadInput) {
   try {
     await connectDB()
 
@@ -68,17 +76,96 @@ export async function sendNotification(message: string) {
       throw new Error("No active subscriptions available")
     }
 
-    const notificationPayload = JSON.stringify({
-      title: "Task Manager",
-      body: message,
-      icon: "/icons/icon-192x192.png", // Correct path to icon
-      badge: "/icons/icon-96x96.png", // Correct path to badge icon (aligned with sw.js default)
-      tag: "task-notification",
+    let notificationPayloadContent: {
+      title: string;
+      body: string;
+      icon: string;
+      badge: string;
+      tag: string;
       data: {
-        url: "/",
-        timestamp: Date.now(),
-      },
-    })
+        url: string;
+        timestamp: number;
+        [key: string]: any; // Allow other custom data
+      };
+    };
+
+    // Construct notificationPayloadContent based on payloadData.type
+    switch (payloadData.type) {
+      case 'task_created':
+        if (!payloadData.task) throw new Error("Task data missing for task_created notification");
+        notificationPayloadContent = {
+          title: 'Task Created!',
+          body: `New task: "${payloadData.task.title}" has been added.`,
+          icon: '/icons/icon-192x192.png',
+          badge: '/icons/icon-96x96.png',
+          tag: `task-created-${payloadData.task._id}`,
+          data: {
+            url: `/tasks/${payloadData.task._id}`, // Assuming you might have a page like /tasks/[taskId]
+            timestamp: Date.now(),
+            taskId: payloadData.task._id,
+          },
+        };
+        break;
+      case 'task_completed':
+        if (!payloadData.task) throw new Error("Task data missing for task_completed notification");
+        notificationPayloadContent = {
+          title: 'Task Completed! 🎉',
+          body: `Task "${payloadData.task.title}" has been marked as complete.`,
+          icon: '/icons/icon-192x192.png',
+          badge: '/icons/icon-96x96.png',
+          tag: `task-completed-${payloadData.task._id}`,
+          data: {
+            url: `/tasks/${payloadData.task._id}`,
+            timestamp: Date.now(),
+            taskId: payloadData.task._id,
+          },
+        };
+        break;
+      case 'task_due':
+        if (!payloadData.task) throw new Error("Task data missing for task_due notification");
+        notificationPayloadContent = {
+          title: 'Task Due!',
+          body: `Reminder: Task "${payloadData.task.title}" is due.`,
+          icon: '/icons/icon-192x192.png',
+          badge: '/icons/icon-96x96.png',
+          tag: `task-due-${payloadData.task._id}`,
+          data: {
+            url: `/tasks/${payloadData.task._id}`,
+            timestamp: Date.now(),
+            taskId: payloadData.task._id,
+          },
+        };
+        break;
+      case 'test_message':
+        notificationPayloadContent = {
+          title: 'Test Notification',
+          body: payloadData.message || 'This is a test notification.',
+          icon: '/icons/icon-192x192.png',
+          badge: '/icons/icon-96x96.png',
+          tag: 'test-notification',
+          data: {
+            url: '/', // Default URL for test
+            timestamp: Date.now(),
+          },
+        };
+        break;
+      default:
+        // Fallback for unknown types
+        console.warn(`Unhandled notification type: ${(payloadData as any).type}`);
+        notificationPayloadContent = {
+          title: 'Task Manager Update',
+          body: payloadData.message || 'You have a new update.',
+          icon: '/icons/icon-192x192.png',
+          badge: '/icons/icon-96x96.png',
+          tag: 'generic-notification',
+          data: {
+            url: '/',
+            timestamp: Date.now(),
+          },
+        };
+    }
+
+    const finalNotificationPayload = JSON.stringify(notificationPayloadContent);
 
     const sendPromises = activeSubscriptions.map(async (subscription) => {
       try {
@@ -87,7 +174,7 @@ export async function sendNotification(message: string) {
             endpoint: subscription.endpoint,
             keys: subscription.keys,
           },
-          notificationPayload,
+          finalNotificationPayload,
         )
 
         // Update last used timestamp
@@ -144,9 +231,13 @@ export async function createTask(taskData: {
 
     // Schedule notification for due date (simplified - in production use a job queue)
     const timeUntilDue = new Date(taskData.dueDate).getTime() - Date.now()
-    if (timeUntilDue > 0 && timeUntilDue < 24 * 60 * 60 * 1000) {
+    if (timeUntilDue > 0 && timeUntilDue < 24 * 60 * 60 * 1000) { // Only schedule if due within 24 hours
       setTimeout(async () => {
-        await sendNotification(`Task "${taskData.title}" is due now!`)
+        await sendNotification({
+          type: 'task_due',
+          // Ensure task._id is available and correctly typed here
+          task: { _id: (task._id as any).toString(), title: task.title }
+        });
       }, timeUntilDue)
     }
 
@@ -211,7 +302,11 @@ export async function completeTask(taskId: string) {
     }
 
     // Send completion notification
-    await sendNotification(`Task "${task.title}" has been completed! 🎉`)
+    await sendNotification({
+      type: 'task_completed',
+      // Ensure task._id is available and correctly typed here
+      task: { _id: (task._id as any).toString(), title: task.title }
+    });
 
     return { success: true, task: task.toObject() }
   } catch (error) {
