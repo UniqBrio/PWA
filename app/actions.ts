@@ -6,12 +6,28 @@ import Task, { type ITask } from "@/models/Task"
 import Subscription from "@/models/Subscription"
 
 // VAPID keys setup
+const VAPID_PUBLIC_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || "BEl62iUYgUivxIkv69yViEuiBIa40HI2wLsHw4XloDiUnzSFvzIlSJRWaAcqP5h6HV6yJXxYJSQJbaYVpAidZis";
+const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY || "VCXEuSHQX6ueEB5ckbAPaEkX6cJhHQnuTjMOcHXldCo";
+
+if (!VAPID_PUBLIC_KEY || !VAPID_PRIVATE_KEY) {
+  console.error("VAPID keys are not configured. Push notifications will not work.");
+}
+
+// VAPID keys setup
 webpush.setVapidDetails(
   "mailto:uniqbrio@gmail.com", // Replace with your actual contact email
-  process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY ||
-    "BEl62iUYgUivxIkv69yViEuiBIa40HI2wLsHw4XloDiUnzSFvzIlSJRWaAcqP5h6HV6yJXxYJSQJbaYVpAidZis",
-  process.env.VAPID_PRIVATE_KEY || "VCXEuSHQX6ueEB5ckbAPaEkX6cJhHQnuTjMOcHXldCo",
-)
+  VAPID_PUBLIC_KEY,
+  VAPID_PRIVATE_KEY
+);
+
+// Log VAPID key status (especially useful for debugging)
+if (process.env.NODE_ENV === 'development') {
+  console.log("VAPID Public Key (first 10 chars):", VAPID_PUBLIC_KEY.substring(0, 10));
+  console.log(
+    "VAPID Private Key:",
+    VAPID_PRIVATE_KEY === "VCXEuSHQX6ueEB5ckbAPaEkX6cJhHQnuTjMOcHXldCo" ? "Using default fallback (ensure this is intended for dev only)" : "Using environment variable"
+  );
+}
 
 // Define a type for the structured notification payload data
 interface NotificationPayloadInput {
@@ -74,13 +90,22 @@ export async function unsubscribeUser(endpoint?: string) {
 }
 
 export async function sendNotification(payloadData: NotificationPayloadInput) {
+  console.log(`[sendNotification] Received request with type: ${payloadData.type}`, payloadData.task ? `for task ID: ${payloadData.task._id}` : (payloadData.message ? `with message: ${payloadData.message}`: ""));
   try {
     await connectDB()
 
     const activeSubscriptions = await Subscription.find({ active: true })
+    console.log(`[sendNotification] Found ${activeSubscriptions.length} active subscription(s).`);
 
     if (activeSubscriptions.length === 0) {
-      throw new Error("No active subscriptions available")
+      console.warn("[sendNotification] No active subscriptions found to send notifications to.");
+      return { success: false, error: "No active subscriptions available", sent: 0, total: 0 };
+    }
+
+    // Ensure task data is present when expected
+    if (['task_created', 'task_completed', 'task_deleted', 'task_due'].includes(payloadData.type) && !payloadData.task) {
+        console.error(`[sendNotification] Task data is missing for notification type: ${payloadData.type}`);
+        throw new Error(`Task data missing for ${payloadData.type} notification`);
     }
 
     let notificationPayloadContent: {
@@ -99,43 +124,40 @@ export async function sendNotification(payloadData: NotificationPayloadInput) {
     // Construct notificationPayloadContent based on payloadData.type
     switch (payloadData.type) {
       case 'task_created':
-        if (!payloadData.task) throw new Error("Task data missing for task_created notification");
         notificationPayloadContent = {
           title: 'Task Created!',
-          body: `New task: "${payloadData.task.title}" has been added.`,
+          body: `New task: "${payloadData.task!.title}" has been added.`,
           icon: '/icons/icon-192x192.png',
           badge: '/icons/icon-96x96.png',
-          tag: `task-created-${payloadData.task._id}`,
+          tag: `task-created-${payloadData.task!._id}`,
           data: {
-            url: `/tasks/${payloadData.task._id}`, // Assuming you might have a page like /tasks/[taskId]
+            url: `/tasks/${payloadData.task?._id}`, // Assuming you might have a page like /tasks/[taskId]
             timestamp: Date.now(),
-            taskId: payloadData.task._id,
+            taskId: payloadData.task?._id,
           },
         };
         break;
       case 'task_completed':
-        if (!payloadData.task) throw new Error("Task data missing for task_completed notification");
         notificationPayloadContent = {
           title: 'Task Completed! 🎉',
-          body: `Task "${payloadData.task.title}" has been marked as complete.`,
+          body: `Task "${payloadData.task!.title}" has been marked as complete.`,
           icon: '/icons/icon-192x192.png',
           badge: '/icons/icon-96x96.png',
-          tag: `task-completed-${payloadData.task._id}`,
+          tag: `task-completed-${payloadData.task!._id}`,
           data: {
-            url: `/tasks/${payloadData.task._id}`,
+            url: `/tasks/${payloadData.task?._id}`,
             timestamp: Date.now(),
-            taskId: payloadData.task._id,
+            taskId: payloadData.task?._id,
           },
         };
         break;
       case 'task_deleted':
-        if (!payloadData.task) throw new Error("Task data missing for task_deleted notification");
         notificationPayloadContent = {
           title: 'Task Deleted',
-          body: `Task "${payloadData.task.title}" has been removed.`,
+          body: `Task "${payloadData.task?.title ?? ''}" has been removed.`,
           icon: '/icons/icon-192x192.png',
           badge: '/icons/icon-96x96.png',
-          tag: `task-deleted-${payloadData.task._id}`, // Use task._id to ensure tag uniqueness if needed
+          tag: `task-deleted-${payloadData.task?. _id ?? ''}`, // Use task._id to ensure tag uniqueness if needed
           data: {
             url: `/tasks`, // Or a relevant URL, like the main task list
             timestamp: Date.now(),
@@ -143,17 +165,16 @@ export async function sendNotification(payloadData: NotificationPayloadInput) {
         };
         break;
       case 'task_due':
-        if (!payloadData.task) throw new Error("Task data missing for task_due notification");
         notificationPayloadContent = {
           title: 'Task Due!',
-          body: `Reminder: Task "${payloadData.task.title}" is due.`,
+          body: `Reminder: Task "${payloadData.task?.title ?? ''}" is due.`,
           icon: '/icons/icon-192x192.png',
           badge: '/icons/icon-96x96.png',
-          tag: `task-due-${payloadData.task._id}`,
+          tag: `task-due-${payloadData.task?._id ?? ''}`,
           data: {
-            url: `/tasks/${payloadData.task._id}`,
+            url: `/tasks/${payloadData.task?._id}`,
             timestamp: Date.now(),
-            taskId: payloadData.task._id,
+            taskId: payloadData.task?._id,
           },
         };
         break;
@@ -186,11 +207,12 @@ export async function sendNotification(payloadData: NotificationPayloadInput) {
         };
     }
 
+    console.log("[sendNotification] Constructed notification content:", JSON.stringify(notificationPayloadContent));
     const finalNotificationPayload = JSON.stringify(notificationPayloadContent);
 
     const sendPromises = activeSubscriptions.map(async (subscription) => {
       try {
-        await webpush.sendNotification(
+        const sendResult = await webpush.sendNotification(
           {
             endpoint: subscription.endpoint,
             keys: subscription.keys,
@@ -198,36 +220,38 @@ export async function sendNotification(payloadData: NotificationPayloadInput) {
           finalNotificationPayload,
         )
 
+        console.log(`[sendNotification] Successfully sent notification to endpoint: ${subscription.endpoint.substring(0,50)}... Status: ${sendResult.statusCode}`);
         // Update last used timestamp
         subscription.lastUsed = new Date()
         await subscription.save()
 
         return { success: true, endpoint: subscription.endpoint }
-      } catch (error) {
-        console.error(`Failed to send notification to ${subscription.endpoint}:`, error)
+      } catch (error: any) {
+        console.error(`[sendNotification] Failed to send to ${subscription.endpoint.substring(0,50)}... Error: ${error.message}`, error);
 
         // Deactivate invalid subscriptions
-        if (
-          typeof error === "object" &&
-          error !== null &&
-          "statusCode" in error &&
-          (error as any).statusCode &&
-          ((error as any).statusCode === 410 || (error as any).statusCode === 404)
-        ) {
-          console.log(`Deactivating subscription for endpoint ${subscription.endpoint} due to status code ${(error as any).statusCode}.`);
+        // Common status codes indicating an expired or invalid subscription:
+        // 400 Bad Request (sometimes used for malformed requests or invalid VAPID)
+        // 401 Unauthorized (VAPID issues)
+        // 403 Forbidden (VAPID issues or other permission problems)
+        // 404 Not Found (endpoint no longer exists)
+        // 410 Gone (endpoint permanently gone)
+        if (error.statusCode && [400, 401, 403, 404, 410].includes(error.statusCode)) {
+          console.log(`[sendNotification] Deactivating subscription for endpoint ${subscription.endpoint.substring(0,50)}... due to status code ${error.statusCode}.`);
           subscription.active = false;
           await subscription.save();
         }
-        return { success: false, endpoint: subscription.endpoint, error }
+        return { success: false, endpoint: subscription.endpoint, error: { message: error.message, statusCode: error.statusCode, body: error.body } };
       }
     })
 
     const results = await Promise.allSettled(sendPromises)
-    const successful = results.filter((result) => result.status === "fulfilled" && result.value.success).length
+    const successfulSends = results.filter((result) => result.status === "fulfilled" && result.value.success).length;
+    console.log(`[sendNotification] Finished sending. Successful: ${successfulSends}/${activeSubscriptions.length}`);
 
     return {
-      success: successful > 0,
-      sent: successful,
+      success: successfulSends > 0,
+      sent: successfulSends,
       total: activeSubscriptions.length,
     }
   } catch (error) {

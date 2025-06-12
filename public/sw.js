@@ -66,10 +66,29 @@ self.addEventListener('fetch', event => {
   event.respondWith(
     caches.match(event.request)
       .then(cachedResponse => {
-        return cachedResponse || fetch(event.request).then(networkResponse => {
-          // Optionally, cache dynamic assets/API responses here if appropriate
-          // Be careful with caching POST requests or sensitive data.
+        if (cachedResponse) {
+          // console.log('[SW] Serving from cache:', event.request.url);
+          return cachedResponse;
+        }
+
+        // console.log('[SW] Not in cache, fetching from network:', event.request.url);
+        return fetch(event.request).then(networkResponse => {
+          // Optional: Cache responses for future offline use.
+          // Be careful about what you cache, especially API responses or non-GET requests.
+          // Example: Cache successful GET requests for assets, but not API calls.
+          if (networkResponse.ok && event.request.method === 'GET' && !event.request.url.includes('/api/')) {
+            const responseToCache = networkResponse.clone();
+            caches.open(CACHE_NAME).then(cache => {
+              // console.log('[SW] Caching network response for:', event.request.url);
+              cache.put(event.request, responseToCache);
+            });
+          }
           return networkResponse;
+        }).catch(error => {
+          console.error('[SW] Network fetch failed for non-navigation request:', event.request.url, error);
+          // Optionally, return a fallback response for specific asset types, e.g., a placeholder image
+          // if (event.request.destination === 'image') return caches.match('/icons/default-image.png'); // Ensure placeholder exists
+          throw error; // Re-throw to allow the browser to handle the network error
         });
       })
   );
@@ -138,6 +157,7 @@ self.addEventListener('push', event => {
     // requireInteraction: pushPayload.requireInteraction,
   };
 
+  console.log('[SW] Attempting to show notification with Title:', `"${pushPayload.title}"`, 'Body:', `"${pushPayload.body}"`, 'Options:', notificationOptions);
   event.waitUntil(
     self.registration.showNotification(pushPayload.title, notificationOptions)
   );

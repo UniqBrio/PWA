@@ -89,7 +89,11 @@ function PushNotificationManager() {
     try {
       await subscription?.unsubscribe()
       setSubscription(null)
-      await unsubscribeUser()
+      // Pass the endpoint of the specific subscription to be deactivated
+      if (subscription?.endpoint) {
+        await unsubscribeUser(subscription.endpoint)
+      }
+      // If you still want a way to "unsubscribe all" from a UI, it should be a separate, explicit action.
     } catch (error) {
       console.error("Unsubscribe failed:", error)
     }
@@ -206,14 +210,8 @@ function TaskManager() {
       setTasks([task, ...tasks])
       setNewTask({ title: "", description: "", dueDate: "", priority: "medium", tags: "" })
       await loadStats()
-      // Send notification for the newly created task
-      if (task.title) {
-        // Send notification with a proper NotificationPayloadInput object
-        await sendNotification({
-          type: "task_created",
-          task: { _id: task._id, title: task.title }
-        });
-      }
+      // The `createTask` server action already sends a notification.
+      // Calling sendNotification here would be redundant.
     } catch (error) {
       console.error("Failed to create task:", error)
       alert("Failed to create task. Please check your input.")
