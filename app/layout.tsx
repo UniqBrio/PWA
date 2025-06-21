@@ -1,11 +1,10 @@
-import type { Metadata } from 'next'
+import type { Metadata, Viewport } from 'next'
 import './globals.css'
-
+// Metadata for the application
 export const metadata: Metadata = {
   title: 'Task Manager PWA',
   description: 'A Progressive Web App for managing tasks with push notifications.',
   generator: 'Next.js',
-  manifest: '/manifest.json',
   // PWA specific metadata consolidated here
   applicationName: 'Task Manager PWA',
   appleWebApp: {

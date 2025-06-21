@@ -4,8 +4,8 @@ import { useState, useEffect } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Badge } from "@/components/ui/badge"
-import { Bell, Plus, Check, Clock } from "lucide-react"
+import { Badge } from "@/components/ui/badge" // Badge is used in TaskManager
+import { Bell, Plus, Check, Clock, Download } from "lucide-react"
 import {
   subscribeUser,
   unsubscribeUser,
@@ -30,6 +30,12 @@ function urlBase64ToUint8Array(base64String: string) {
   return outputArray
 }
 
+// Utility function to convert Uint8Array to URL-safe base64 string
+function uint8ArrayToBase64Url(uint8Array: Uint8Array): string {
+  const base64 = btoa(String.fromCharCode.apply(null, Array.from(uint8Array)));
+  return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
 interface Task {
   _id: string
   title: string
@@ -40,6 +46,57 @@ interface Task {
   tags: string[]
   createdAt: string
   completedAt?: string
+}
+
+function AppInstallControls() {
+  const [deferredPrompt, setDeferredPrompt] = useState<Event | null>(null);
+
+  useEffect(() => {
+    const handler = (e: Event) => {
+      // Prevent the mini-infobar from appearing on mobile
+      e.preventDefault();
+      // Stash the event so it can be triggered later.
+      setDeferredPrompt(e);
+      console.log("`beforeinstallprompt` event fired and stashed.");
+    };
+
+    window.addEventListener('beforeinstallprompt', handler);
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handler);
+    };
+  }, []);
+
+  const handleInstallClick = async () => {
+    if (!deferredPrompt) return;
+    // Show the install prompt
+    (deferredPrompt as any).prompt();
+    // Wait for the user to respond to the prompt
+    const { outcome } = await (deferredPrompt as any).userChoice;
+    console.log(`User response to the install prompt: ${outcome}`);
+    // We've used the prompt, and can't use it again, discard it
+    setDeferredPrompt(null);
+  };
+
+  if (!deferredPrompt) {
+    return null; // Don't show anything if the app is already installed or not installable
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Download className="w-5 h-5" /> Install App
+        </CardTitle>
+        <CardDescription>Install this application on your device for a better experience.</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <Button onClick={handleInstallClick} className="w-full">
+          Install Task Manager
+        </Button>
+      </CardContent>
+    </Card>
+  );
 }
 
 function PushNotificationManager() {
@@ -78,8 +135,20 @@ function PushNotificationManager() {
         ),
       })
       setSubscription(sub)
-      const serializedSub = JSON.parse(JSON.stringify(sub))
-      await subscribeUser(serializedSub)
+
+      // Manually serialize the subscription to ensure keys are correctly transferred
+      const p256dhKey = sub.getKey('p256dh');
+      const authKey = sub.getKey('auth');
+
+      const serializedSubForServer = {
+        endpoint: sub.endpoint,
+        expirationTime: sub.expirationTime,
+        keys: {
+          p256dh: p256dhKey ? uint8ArrayToBase64Url(new Uint8Array(p256dhKey)) : null,
+          auth: authKey ? uint8ArrayToBase64Url(new Uint8Array(authKey)) : null,
+        },
+      };
+      await subscribeUser(serializedSubForServer)
     } catch (error) {
       console.error("Push subscription failed:", error)
     }
@@ -429,6 +498,7 @@ export default function Page() {
           <p className="text-muted-foreground">A Progressive Web App with push notifications</p>
         </div>
 
+        <AppInstallControls />
         <PushNotificationManager />
         <TaskManager />
       </div>

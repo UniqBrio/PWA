@@ -29,6 +29,17 @@ if (process.env.NODE_ENV === 'development') {
   );
 }
 
+// Define the interface for the serialized subscription received from the client
+interface PushSubscriptionJSON {
+  endpoint: string;
+  expirationTime: number | null;
+  keys: {
+    p256dh: string | null;
+    auth: string | null;
+  };
+  userAgent?: string; // Optional, if you pass it from the client
+}
+
 // Define a type for the structured notification payload data
 interface NotificationPayloadInput {
   type: 'task_created' | 'task_completed' | 'task_deleted' | 'task_due' | 'test_message';
@@ -37,23 +48,18 @@ interface NotificationPayloadInput {
   // Add other potential properties as needed for different notification types
 }
 
-export async function subscribeUser(sub: PushSubscription) {
+export async function subscribeUser(sub: PushSubscriptionJSON) {
   try {
     await connectDB()
-    const p256dhKey = typeof sub.getKey === "function" ? sub.getKey("p256dh") : null;
-    const authKey = typeof sub.getKey === "function" ? sub.getKey("auth") : null;
-
     const subscription = await Subscription.findOneAndUpdate(
       { endpoint: sub.endpoint },
       {
         endpoint: sub.endpoint,
-        keys: {
-          p256dh: p256dhKey ? Buffer.from(p256dhKey).toString("base64") : undefined,
-          auth: authKey ? Buffer.from(authKey).toString("base64") : undefined,
+        keys: { // Keys are already base64url encoded from the client
+          p256dh: sub.keys.p256dh,
+          auth: sub.keys.auth,
         },
-        // Note: `navigator.userAgent` will be undefined here as this is server-side code.
-        // If userAgent is needed for analytics or debugging, it should be passed from the client.
-        userAgent: typeof navigator !== "undefined" ? navigator.userAgent : undefined, 
+        userAgent: sub.userAgent, // User agent should be passed from client if needed
         lastUsed: new Date(),
         active: true,
       },
@@ -204,7 +210,7 @@ export async function sendNotification(payloadData: NotificationPayloadInput) {
             url: '/',
             timestamp: Date.now(),
           },
-        };
+     };
     }
 
     console.log("[sendNotification] Constructed notification content:", JSON.stringify(notificationPayloadContent));
